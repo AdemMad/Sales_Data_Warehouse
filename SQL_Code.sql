@@ -27,9 +27,6 @@ create table staging (
     Profit float
 );
 
-update staging
-set Postal_Code = '05408'
-where Order_ID = 'US-2016-165505' and city = 'burlington' and state = 'vermont' and region = 'east';
 
 --orders table--
 drop table  if exists dim_orders;

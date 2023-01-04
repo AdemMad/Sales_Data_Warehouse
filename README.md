@@ -1,2 +1,3 @@
 # Data_Warehouse
-Creating a star schema
+SQL Code: Creating a star schema (staging, dimensions, fact table)
+SSIS: Integrating Data Source into Dimensions

@@ -1,144 +1,124 @@
-drop database if exists sales_DB;
-create database sales_DB;
-
-use sales_DB;
---staging table--
-drop table  if exists staging;
-create table staging (
-    Order_ID varchar (100),
-    Order_Date date,
-    Ship_Date date,
-    Ship_Mode varchar (100),
-    Customer_ID varchar (100),
-    Customer_Name varchar (100),
-    Segment varchar (100),
-    Country varchar (100),
-    City varchar (100),
-    State varchar (100),
-    Postal_Code varchar (100),
-    Region varchar (100),
-    Product_ID varchar (100),
-    Category varchar (100),
-    Sub_Category varchar (100), 
-    Product_Name varchar (200), 
-    Sales float,
-    Quantity int,
-    Discount float,
-    Profit float
+-- Create dimension tables
+CREATE TABLE DimLocation (
+Location_Key INT PRIMARY KEY IDENTITY(1,1), Country VARCHAR(50),
+City VARCHAR(50),
+State VARCHAR(50),
+Postal_Code VARCHAR(50),
+Region VARCHAR(50),
+IsCurrent BIT,
+ValidFrom DATE,
+ValidTo DATE
 );
 
-
---orders table--
-drop table  if exists dim_orders;
-create table dim_orders (
-    Order_SK int identity (1,1),
-    Order_ID varchar (100),
-    Order_Date date,
-    Ship_Date date,
-    Ship_Mode varchar (100),
-    constraint pk_ord primary key (Order_SK)
+CREATE TABLE DimCustomer (
+Customer_Key INT PRIMARY KEY IDENTITY(1,1),
+Customer_ID INT UNIQUE,
+Customer_Name VARCHAR(50),
+Segment VARCHAR(50),
+Location_Key INT,
+FOREIGN KEY (Location_Key) REFERENCES DimLocation(Location_Key), IsCurrent BIT,
+ValidFrom DATE,
+ValidTo DATE
 );
 
-
---customers table--
-drop table  if exists dim_customers;
-create table dim_customers (
-    Customer_SK int identity (1,1),
-    Customer_ID varchar (100),
-    Full_Name varchar (100),
-    F_Name as cast(substring (Full_Name, 0, charindex (' ', Full_Name)) as varchar (100)),
-    L_Name  as cast(ltrim(substring (Full_Name, charindex (' ', Full_Name), 20)) as varchar (100)),
-    Segment varchar (100),
-    constraint pk_cust primary key (Customer_SK)
+CREATE TABLE DimProduct (
+Product_Key INT PRIMARY KEY IDENTITY(1,1), Product_ID INT UNIQUE,
+Category VARCHAR(50),
+Sub_Category VARCHAR(50),
+Product_Name VARCHAR(50),
+IsCurrent BIT,
+ValidFrom DATE,
+ValidTo DATE
 );
 
-
---location table--
-drop table if exists dim_location;
-create table dim_location (
-    Location_SK int identity (1,1),
-    Country varchar (100),
-    City varchar (100),
-    State varchar (100),
-    Postal_Code varchar (100),
-    Region varchar (100),
-    constraint pk_loc primary key (Location_SK)
+--Create DimDate table
+CREATE TABLE DimDate (
+TimeDimID INT IDENTITY(1,1) PRIMARY KEY, FullDate DATE NOT NULL,
+Year INT NOT NULL,
+Quarter INT NOT NULL,
+Month INT NOT NULL,
+MonthName VARCHAR(9) NOT NULL,
+Week INT NOT NULL,
+DayOfYear INT NOT NULL,
+DayOfMonth INT NOT NULL,
+DayOfWeek INT NOT NULL,
+WeekdayName VARCHAR(9) NOT NULL, IsWeekend BIT NOT NULL
+);
+ 
+ -- Create fact table
+CREATE TABLE FactSales ( Order_ID INT PRIMARY KEY, Customer_Key INT, Product_Key INT, Date_Key INT,
+Sales DECIMAL(18,2),
+Quantity INT,
+Discount DECIMAL(18,2),
+Profit DECIMAL(18,2),
+FOREIGN KEY (Customer_Key) REFERENCES DimCustomer(Customer_Key), FOREIGN KEY (Product_Key) REFERENCES DimProduct(Product_Key), FOREIGN KEY (Date_Key) REFERENCES DimDate(Date_Key)
 );
 
+-- Insert data into dimension tables
+INSERT INTO DimLocation (Country, City, State, Postal_Code, Region, IsCurrent, ValidFrom, ValidTo)
+SELECT DISTINCT
+Country, City, State, Postal_Code, Region,
+1 as IsCurrent,
+CAST(GETDATE() AS DATE) as ValidFrom, '9999-12-31' as ValidTo
+FROM Data;
+INSERT INTO DimCustomer (Customer_ID, Customer_Name, Segment, Location_Key, IsCurrent, ValidFrom, ValidTo)
+SELECT DISTINCT
+Customer_ID,
+Customer_Name,
+Segment,
+DimLocation.Location_Key,
+1 as IsCurrent,
+CAST(GETDATE() AS DATE) as ValidFrom, '9999-12-31' as ValidTo
+FROM Data
+JOIN DimLocation ON Data.Country = DimLocation.Country AND Data.City = DimLocation.City
+AND Data.State = DimLocation.State
+AND Data.Postal_Code = DimLocation.Postal_Code
+AND Data.Region = DimLocation.Region;
 
---product table--
-drop table if exists dim_product;
-create table dim_product (
-    Product_SK int identity (1,1),
-    Product_ID varchar (100),
-    Category varchar (100),
-    Sub_Category varchar (100), 
-    Product_Name varchar (200), 
-    constraint pk_prod primary key (Product_SK)
-);
-
-
---date table--
-drop table if exists dim_date;
-declare @start_date date = '2013-01-01'
-declare @end_date date = '2018-01-01'
-;with date_1  as (
-select 1 as Date_SK, @start_date as date
-union all
-select Date_SK + 1, dateadd(DAY, +1, date)
-from date_1 
-where dateadd(DAY, +1, date) < @end_date
+INSERT INTO DimProduct (Product_ID, Category, Sub_Category, Product_Name, IsCurrent, ValidFrom, ValidTo)
+SELECT DISTINCT
+Product_ID,
+Category,
+Sub_Category,
+Product_Name,
+1 as IsCurrent,
+CAST(GETDATE() AS DATE) as ValidFrom, '9999-12-31' as ValidTo
+FROM Data;
+--Populate TimeDim table
+;WITH cte AS (
+    SELECT
+DATEADD(day, number, '2010-01-01') as FullDate FROM
+master..spt_values WHERE
+type = 'P' AND
+number <= DATEDIFF(day, '2010-01-01', '2025-01-01')
 )
 
-select Date_SK, date, year(date) as year, datename(month, date) as month_name , day(date) as day, case 
-when month(date) between 1 and 3 then 'Q1'
-when month(date) between 4 and 6 then 'Q2'
-when month(date) between 7 and 9 then 'Q3'
-else 'Q4' end as quarter,
-datename(weekday, date) as day_name into dim_date
-from date_1
-order by 1
-option (maxrecursion 0);
+INSERT INTO DimDate (FullDate, Year, Quarter, Month, MonthName, Week, DayOfYear, DayOfMonth, DayOfWeek, WeekdayName, IsWeekend)
+SELECT
+FullDate,
+YEAR(FullDate) as Year,
+DATEPART(quarter, FullDate) as Quarter, MONTH(FullDate) as Month,
+DATENAME(month, FullDate) as MonthName, DATEPART(week, FullDate) as Week, DATEPART(dayofyear, FullDate) as DayOfYear, DAY(FullDate) as DayOfMonth, DATEPART(weekday, FullDate) as DayOfWeek, DATENAME(weekday, FullDate) as WeekdayName, CASE
+WHEN DATENAME(weekday, FullDate) IN ('Saturday', 'Sunday') THEN 1
+ELSE 0
+END as IsWeekend
+FROM
+cte
+-- Insert data into fact table
+INSERT INTO FactSales (Order_ID, Customer_Key, Product_Key, Date_Key, Sales, Quantity, Discount, Profit)
+SELECT
+Order_ID, DimCustomer.Customer_Key, DimProduct.Product_Key, DimDate.Date_Key,
 
-
-alter table dim_date
-alter column Date_SK int not null;
-
-alter table dim_date
-add constraint pk_date primary key (Date_SK);
-
---create fact table--
-drop table if exists fact_table;
-create table fact_table (
-    Order_SK int,
-    Customer_SK int,
-    Location_SK int,
-    Product_SK int,
-    Date_SK int,
-    Sales float,
-    Quantity int,
-    Discount float,
-    Profit float
-    constraint fk_ord foreign key (Order_SK) references dim_orders(Order_SK),
-    constraint fk_cust foreign key (Customer_SK) references dim_customers(Customer_SK),
-    constraint fk_loc foreign key (Location_SK) references dim_location(Location_SK),
-    constraint fk_prod foreign key (Product_SK) references dim_product(Product_SK),
-    constraint fk_date foreign key (Date_SK) references dim_date(Date_SK)
-);
-
-insert into fact_table
-select 
-b.Order_SK, 
-c.Customer_SK, 
-d.Location_SK, 
-e.Product_SK, 
-f.Date_SK, 
-round(a.Sales, 2) as Sales, 
-a.Quantity, round(a.Discount, 2) as Discount, 
-round(a.Profit, 2) as Profit
-from staging a
-left join dim_orders b on a.Order_ID=b.Order_ID
-left join dim_customers c on a.Customer_ID=c.Customer_ID
-left join dim_location d on a.Postal_Code=d.Postal_Code and a.City=d.City and a.State=d.State and a.Region=d.Region
-left join dim_product e on a.Product_ID=e.Product_ID and a.Product_Name=e.Product_Name and a.Category=e.Category and a.Sub_Category=e.Sub_Category
-left join dim_date f on a.Order_Date=f.Date;
+         Sales,
+        Quantity,
+        Discount,
+        Profit
+FROM Data
+JOIN DimCustomer ON Data.Customer_ID = DimCustomer.Customer_ID JOIN DimProduct ON Data.Product_ID = DimProduct.Product_ID JOIN DimDate ON Data.Order_Date = DimDate.Order_Date;
+-- Update the IsCurrent, ValidTo values for the previous name
+UPDATE DimCustomer
+SET IsCurrent = 0, ValidTo = GETDATE()
+WHERE Customer_Key = [specific customer key] and IsCurrent = 1;
+-- Insert a new row with the new name
+INSERT INTO DimCustomer (Customer_Key, Customer_ID, Customer_Name, Segment, Location_Key, IsCurrent, ValidFrom, ValidTo)
+VALUES ([specific customer key], [customer_id], [new_name], [segment], [location_key], 1, GETDATE(), '9999-12-31')
